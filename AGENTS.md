@@ -28,3 +28,6 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+# AGENTS
+- Atelier OS state lives in browser localStorage (src/lib/atelier.ts) for the prototype; move to Cloud when accounts/sync are needed.
+- AI mentor calls go through createServerFn in src/lib/atelier.functions.ts (Lovable AI Gateway, Gemini) returning JSON {reply, skills, task}.
