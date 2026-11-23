@@ -17,14 +17,16 @@ export type State = {
   doneDays: string[];
   messages: Msg[];
   gallery: { image: string; date: string; note: string }[];
+  theme: string;
+  apiKey: string;
 };
 const iso = (d: Date) => d.toLocaleDateString("sv-SE");
 export const today = () => iso(new Date());
 export const initialState = (): State => {
-  const skills: Skills = { anatomy: 38, pose: 42, line: 48, color: 56, light: 38, detail: 56 };
-  return { skills, history: [{ date: today(), skills }], task: null, doneDays: [], messages: [], gallery: [] };
+  const skills: Skills = { anatomy: 0, pose: 0, line: 0, color: 0, light: 0, detail: 0 };
+  return { skills, history: [{ date: today(), skills }], task: null, doneDays: [], messages: [], gallery: [], theme: "atrament", apiKey: "" };
 };
-const KEY = "atelieros-v1";
+const KEY = "atelieros-v2";
 export function load(): State {
   try { const s = localStorage.getItem(KEY); if (s) return { ...initialState(), ...JSON.parse(s) }; } catch { /* ignore */ }
   return initialState();
@@ -40,6 +42,10 @@ export function streak(days: string[]): number {
   return n;
 }
 export function rank(avg: number) {
+  if (avg === 0) return "Nieoceniony";
+  if (avg < 16) return "Nowicjusz"; if (avg < 31) return "Szkicownik"; if (avg < 46) return "Czeladnik";
+  if (avg < 61) return "Rzemieślnik"; if (avg < 76) return "Ilustrator"; if (avg < 89) return "Profesjonalista";
+  if (avg < 98) return "Mistrz"; return "Perfekcja";
   if (avg < 25) return "Szkicownik"; if (avg < 45) return "Czeladnik"; if (avg < 65) return "Rzemieślnik";
   if (avg < 85) return "Artysta"; return "Mistrz Atelier";
 }
@@ -52,3 +58,11 @@ export async function compressImage(file: File, max = 1280): Promise<string> {
   URL.revokeObjectURL(url);
   return c.toDataURL("image/jpeg", 0.82);
 }
+
+export const THEMES = [
+  { id: "atrament", name: "Atrament", colors: ["#16181f", "#5b9cf0", "#f0a64a"] },
+  { id: "sakura", name: "Sakura", colors: ["#1f1519", "#f08cb4", "#f5d58a"] },
+  { id: "terminal", name: "Terminal", colors: ["#0c120d", "#4ee07a", "#c8f04e"] },
+  { id: "neon", name: "Neon", colors: ["#120d1f", "#3ee0f0", "#f04ec8"] },
+  { id: "pergamin", name: "Pergamin", colors: ["#f3ecdc", "#3b5f9a", "#c0582e"] },
+];

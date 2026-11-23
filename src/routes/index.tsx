@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2 } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Eye, EyeOff, Download, Upload } from "lucide-react";
 import { askAtelier } from "@/lib/atelier.functions";
-import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg } from "@/lib/atelier";
+import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES } from "@/lib/atelier";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/")({
   component: Atelier,
 });
 
-type Tab = "panel" | "mentor" | "galeria";
+type Tab = "panel" | "mentor" | "galeria" | "ustawienia";
 
 function Atelier() {
   const [st, setSt] = useState<State | null>(null);
@@ -29,6 +29,7 @@ function Atelier() {
 
   useEffect(() => setSt(load()), []);
   useEffect(() => { if (st) save(st); }, [st]);
+  useEffect(() => { if (st) document.documentElement.dataset.theme = st.theme; }, [st?.theme]);
   if (!st) return <div className="min-h-screen bg-background" />;
 
   const s = streak(st.doneDays);
@@ -41,7 +42,7 @@ function Atelier() {
     setSt((p) => p && { ...p, messages: [...p.messages, userMsg] });
     try {
       const r = await askAtelier({ data: {
-        mode, message: userMsg.content, ...(image ? { image } : {}), skills: st.skills, streak: s,
+        mode, message: userMsg.content, ...(st.apiKey ? { apiKey: st.apiKey } : {}), ...(image ? { image } : {}), skills: st.skills, streak: s,
         recent: st.messages.slice(-8).map((m) => ({ role: m.role, content: m.content.slice(0, 1500) })),
       } });
       if ("error" in r && r.error) { setErr(r.error); return; }
@@ -74,11 +75,12 @@ function Atelier() {
         {tab === "panel" && <Panel st={st} setSt={setSt} avg={avg} streakN={s} busy={busy} ask={ask} goMentor={() => setTab("mentor")} />}
         {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} />}
         {tab === "galeria" && <Gallery st={st} />}
+        {tab === "ustawienia" && <SettingsView st={st} setSt={setSt} />}
       </main>
 
       <nav className="fixed bottom-0 inset-x-0 border-t border-border bg-card/95 backdrop-blur">
-        <div className="mx-auto max-w-2xl grid grid-cols-3">
-          {([["panel", "Panel", LayoutDashboard], ["mentor", "Mentor", MessageSquare], ["galeria", "Galeria", Images]] as const).map(([k, l, I]) => (
+        <div className="mx-auto max-w-2xl grid grid-cols-4">
+          {([["panel", "Panel", LayoutDashboard], ["mentor", "Mentor", MessageSquare], ["galeria", "Galeria", Images], ["ustawienia", "Ustawienia", Cog]] as const).map(([k, l, I]) => (
             <button key={k} onClick={() => setTab(k)} className={`flex flex-col items-center gap-1 py-3 text-[11px] uppercase tracking-wider ${tab === k ? "text-accent" : "text-muted-foreground"}`}>
               <I size={20} />{l}
             </button>
@@ -104,7 +106,8 @@ function Panel({ st, setSt, avg, streakN, busy, ask, goMentor }: {
   st: State; setSt: React.Dispatch<React.SetStateAction<State | null>>; avg: number; streakN: number; busy: boolean;
   ask: (m: "review" | "task" | "chat", msg: string, img?: string) => Promise<void>; goMentor: () => void;
 }) {
-  const first = st.history[0]?.skills;
+  const first = st.history.find((h) => SKILLS.some((k) => h.skills[k.key] > 0))?.skills;
+  const rated = SKILLS.some((k) => st.skills[k.key] > 0);
   const task = st.task;
   const taskToday = task?.date === today();
   return (
@@ -118,17 +121,18 @@ function Panel({ st, setSt, avg, streakN, busy, ask, goMentor }: {
       <Section title="📊 Moduł 1: Umiejętności" right={<span className="text-[10px] text-muted-foreground">zarządza AI</span>}>
         <div className="space-y-3">
           {SKILLS.map((k) => {
-            const v = st.skills[k.key]; const d = first ? v - first[k.key] : 0;
+            const v = st.skills[k.key]; const d = first && first[k.key] > 0 ? v - first[k.key] : 0;
             return (
               <div key={k.key}>
                 <div className="flex justify-between text-xs uppercase"><span>{k.label}</span>
-                  <span><b>{v}</b><span className="text-muted-foreground">/100</span>{d !== 0 && <span className={d > 0 ? "text-chart-3 ml-1" : "text-destructive ml-1"}>{d > 0 ? "+" : ""}{d}</span>}</span>
+                  <span><b>{v || "—"}</b><span className="text-muted-foreground">/100</span>{d !== 0 && <span className={d > 0 ? "text-chart-3 ml-1" : "text-destructive ml-1"}>{d > 0 ? "+" : ""}{d}</span>}</span>
                 </div>
                 <div className="bar-track mt-1 h-3 overflow-hidden rounded-sm border border-border"><div className="bar-fill h-full" style={{ width: `${v}%` }} /></div>
               </div>
             );
           })}
         </div>
+        {!rated && <p className="mt-3 text-xs text-muted-foreground">Paski startują od zera. Wyślij pierwszą pracę do Mentora — dostaniesz uczciwą ocenę, w której 100 to totalna perfekcja.</p>}
         {st.history.length > 1 && <p className="mt-3 text-[11px] text-muted-foreground">Zmiana od startu ({st.history[0]?.date}) · {st.history.length} pomiarów</p>}
       </Section>
 
@@ -160,7 +164,6 @@ function Panel({ st, setSt, avg, streakN, busy, ask, goMentor }: {
           <button disabled={busy} onClick={() => { goMentor(); void ask("chat", "Nie mam dziś mocy. Daj mi zadanie 10 minut bez wymówek."); }} className="rounded border border-border bg-muted p-3 text-left">🔋 Tryb 10 minut</button>
           <button disabled={busy} onClick={() => { goMentor(); void ask("chat", "Podsumuj mój postęp i zaproponuj plan na najbliższy tydzień."); }} className="rounded border border-border bg-muted p-3 text-left">🗓️ Plan tygodnia</button>
         </div>
-        <button onClick={() => { if (confirm("Wyczyścić wszystkie dane Atelier?")) setSt(initialState()); }} className="mt-3 text-[11px] text-muted-foreground underline">reset danych</button>
       </Section>
     </>
   );
@@ -233,5 +236,55 @@ function Gallery({ st }: { st: State }) {
         </figure>
       ))}
     </div>
+  );
+}
+
+function SettingsView({ st, setSt }: { st: State; setSt: React.Dispatch<React.SetStateAction<State | null>> }) {
+  const [show, setShow] = useState(false);
+  const [key, setKey] = useState(st.apiKey);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportData = () => {
+    const blob = new Blob([JSON.stringify({ ...st, apiKey: "" })], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `atelieros-${today()}.json`; a.click();
+  };
+  return (
+    <>
+      <Section title="🎨 Motyw">
+        <div className="grid grid-cols-2 gap-2">
+          {THEMES.map((t) => (
+            <button key={t.id} onClick={() => setSt((p) => p && { ...p, theme: t.id })}
+              className={`flex items-center gap-2 rounded border p-2 text-left text-sm ${st.theme === t.id ? "border-accent" : "border-border"}`}>
+              <span className="flex">{t.colors.map((c) => <span key={c} className="h-5 w-5 rounded-full border border-border -mr-1" style={{ background: c }} />)}</span>
+              <span className="ml-2">{t.name}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+      <Section title="🔑 Klucz Gemini (opcjonalny)">
+        <p className="mb-2 text-xs text-muted-foreground">Bez klucza mentor działa na wbudowanym AI. Z kluczem z Google AI Studio zapytania idą na Twoje konto Gemini. Klucz zostaje tylko w tej przeglądarce.</p>
+        <div className="flex gap-2">
+          <input type={show ? "text" : "password"} value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza…"
+            className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring" />
+          <button onClick={() => setShow(!show)} className="rounded border border-border px-2" aria-label="Pokaż klucz">{show ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+        </div>
+        <div className="mt-2 flex gap-2 text-sm">
+          <button onClick={() => setSt((p) => p && { ...p, apiKey: key.trim() })} className="rounded bg-primary px-3 py-2 font-semibold text-primary-foreground">Zapisz</button>
+          {st.apiKey && <button onClick={() => { setKey(""); setSt((p) => p && { ...p, apiKey: "" }); }} className="rounded border border-border px-3 py-2">Usuń klucz</button>}
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">Aktywne: {st.apiKey ? "Twój klucz Gemini" : "wbudowane AI"}</p>
+      </Section>
+      <Section title="💾 Dane">
+        <div className="flex flex-wrap gap-2 text-sm">
+          <button onClick={exportData} className="inline-flex items-center gap-2 rounded border border-border px-3 py-2"><Download size={16} />Eksportuj kopię</button>
+          <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 rounded border border-border px-3 py-2"><Upload size={16} />Wczytaj kopię</button>
+          <input ref={fileRef} type="file" accept="application/json" hidden onChange={async (e) => {
+            const f = e.target.files?.[0]; if (!f) return;
+            try { const d = JSON.parse(await f.text()); setSt((p) => p && { ...initialState(), ...d, apiKey: p.apiKey }); } catch { alert("Niepoprawny plik."); }
+            e.target.value = "";
+          }} />
+          <button onClick={() => { if (confirm("Wyczyścić wszystkie postępy?")) setSt((p) => p && { ...initialState(), theme: p.theme, apiKey: p.apiKey }); }} className="rounded border border-destructive px-3 py-2 text-destructive">Reset postępów</button>
+        </div>
+      </Section>
+    </>
   );
 }
