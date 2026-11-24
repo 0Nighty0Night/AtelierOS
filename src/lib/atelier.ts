@@ -1,40 +1,61 @@
+import { z } from 'zod';
+import { zeroSkills } from './atelier-scoring';
+export type { Skills } from './atelier-scoring';
 export const SKILLS = [
-  { key: "anatomy", label: "Anatomia i proporcje" },
-  { key: "pose", label: "Poza, ruch i gest" },
-  { key: "line", label: "Linia i cleanup" },
-  { key: "color", label: "Kolor i klimat" },
-  { key: "light", label: "Światłocień i bryła" },
-  { key: "detail", label: "Detal, ubiór i styl" },
+  { key: 'anatomy', label: 'Anatomia i proporcje' },
+  { key: 'pose', label: 'Poza, ruch i gest' },
+  { key: 'line', label: 'Linia i cleanup' },
+  { key: 'color', label: 'Kolor i klimat' },
+  { key: 'light', label: 'Światłocień i bryła' },
+  { key: 'detail', label: 'Detal, ubiór i styl' },
 ] as const;
-export type SkillKey = (typeof SKILLS)[number]["key"];
-export type Skills = Record<SkillKey, number>;
-export type Task = { title: string; minutes: number; steps: string[]; focus: string; date: string; done?: boolean };
-export type Msg = { role: "user" | "assistant"; content: string; image?: string | undefined; at: number };
-export type State = {
-  skills: Skills;
-  history: { date: string; skills: Skills }[];
-  task: Task | null;
-  doneDays: string[];
-  messages: Msg[];
-  gallery: { image: string; date: string; note: string }[];
-  theme: string;
-  apiKey: string;
-};
-const iso = (d: Date) => d.toLocaleDateString("sv-SE");
+export type SkillKey = (typeof SKILLS)[number]['key'];
+export const THEMES = [
+  { id: 'atrament', name: 'Atrament' }, { id: 'sakura', name: 'Sakura' },
+  { id: 'terminal', name: 'Terminal' }, { id: 'neon', name: 'Neon' }, { id: 'pergamin', name: 'Pergamin' },
+] as const;
+const score = z.number().finite().min(0).max(100);
+const skillsSchema = z.object({ anatomy: score, pose: score, line: score, color: score, light: score, detail: score });
+export const taskSchema = z.object({ title: z.string(), minutes: z.number().positive(), steps: z.array(z.string()), focus: z.string() });
+const imageSchema = z.string().regex(/^data:image\/(jpeg|png|webp);base64,/);
+const stateSchema = z.object({
+  skills: skillsSchema,
+  history: z.array(z.object({ date: z.string(), skills: skillsSchema })),
+  task: taskSchema.extend({ date: z.string(), done: z.boolean().optional() }).nullable(),
+  doneDays: z.array(z.string()),
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string(), image: imageSchema.optional(), at: z.number() })),
+  gallery: z.array(z.object({ image: imageSchema, date: z.string(), note: z.string() })),
+  theme: z.enum(['atrament', 'sakura', 'terminal', 'neon', 'pergamin']).default('atrament'),
+  aiProvider: z.enum(['built-in', 'own']).default('built-in'),
+});
+export type State = z.infer<typeof stateSchema>;
+export type Task = NonNullable<State['task']>;
+export type Msg = State['messages'][number];
+const iso = (d: Date) => d.toLocaleDateString('sv-SE');
 export const today = () => iso(new Date());
-export const initialState = (): State => {
-  const skills: Skills = { anatomy: 0, pose: 0, line: 0, color: 0, light: 0, detail: 0 };
-  return { skills, history: [{ date: today(), skills }], task: null, doneDays: [], messages: [], gallery: [], theme: "atrament", apiKey: "" };
-};
-const KEY = "atelieros-v2";
+export const initialState = (): State => ({
+  skills: zeroSkills(), history: [], task: null, doneDays: [], messages: [], gallery: [], theme: 'atrament', aiProvider: 'built-in',
+});
+const KEY = 'atelieros-v2';
+export function parseBackup(value: unknown): State {
+  const s = stateSchema.parse(value);
+  if (!s.gallery.length) { s.skills = zeroSkills(); s.history = []; }
+  return s;
+}
 export function load(): State {
-  try { const s = localStorage.getItem(KEY); if (s) return { ...initialState(), ...JSON.parse(s) }; } catch { /* ignore */ }
+  try {
+    const raw = localStorage.getItem(KEY) ?? localStorage.getItem('atelieros-v1');
+    if (raw) {
+      const parsed = parseBackup(JSON.parse(raw));
+      // Re-save the validated state to remove old insecure apiKey fields.
+      localStorage.setItem(KEY, JSON.stringify(parsed));
+      localStorage.removeItem('atelieros-v1');
+      return parsed;
+    }
+  } catch { /* malformed data does not crash the UI */ }
   return initialState();
 }
-export function save(s: State) {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); }
-  catch { localStorage.setItem(KEY, JSON.stringify({ ...s, gallery: s.gallery.slice(-3), messages: s.messages.slice(-20).map(({ image: _i, ...m }) => m) })); }
-}
+export function save(s: State) { localStorage.setItem(KEY, JSON.stringify(s)); }
 export function streak(days: string[]): number {
   const set = new Set(days); let n = 0; const d = new Date();
   if (!set.has(today())) d.setDate(d.getDate() - 1);
@@ -42,27 +63,21 @@ export function streak(days: string[]): number {
   return n;
 }
 export function rank(avg: number) {
-  if (avg === 0) return "Nieoceniony";
-  if (avg < 16) return "Nowicjusz"; if (avg < 31) return "Szkicownik"; if (avg < 46) return "Czeladnik";
-  if (avg < 61) return "Rzemieślnik"; if (avg < 76) return "Ilustrator"; if (avg < 89) return "Profesjonalista";
-  if (avg < 98) return "Mistrz"; return "Perfekcja";
-  if (avg < 25) return "Szkicownik"; if (avg < 45) return "Czeladnik"; if (avg < 65) return "Rzemieślnik";
-  if (avg < 85) return "Artysta"; return "Mistrz Atelier";
+  if (avg === 0) return 'Nieoceniony';
+  if (avg < 16) return 'Nowicjusz'; if (avg < 31) return 'Szkicownik'; if (avg < 46) return 'Czeladnik';
+  if (avg < 61) return 'Rzemieślnik'; if (avg < 76) return 'Ilustrator'; if (avg < 89) return 'Profesjonalista';
+  if (avg < 98) return 'Mistrz'; if (avg < 100) return 'Wirtuoz'; return 'Perfekcja';
 }
 export async function compressImage(file: File, max = 1280): Promise<string> {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Wybierz obraz JPG, PNG lub WebP.');
   const url = URL.createObjectURL(file);
-  const img = await new Promise<HTMLImageElement>((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = err; i.src = url; });
-  const scale = Math.min(1, max / Math.max(img.width, img.height));
-  const c = document.createElement("canvas"); c.width = img.width * scale; c.height = img.height * scale;
-  c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  URL.revokeObjectURL(url);
-  return c.toDataURL("image/jpeg", 0.82);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error('Nie udało się otworzyć obrazu.')); i.src = url; });
+    const scale = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new Error('Nie udało się przygotować obrazu.');
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  } finally { URL.revokeObjectURL(url); }
 }
-
-export const THEMES = [
-  { id: "atrament", name: "Atrament", colors: ["#16181f", "#5b9cf0", "#f0a64a"] },
-  { id: "sakura", name: "Sakura", colors: ["#1f1519", "#f08cb4", "#f5d58a"] },
-  { id: "terminal", name: "Terminal", colors: ["#0c120d", "#4ee07a", "#c8f04e"] },
-  { id: "neon", name: "Neon", colors: ["#120d1f", "#3ee0f0", "#f04ec8"] },
-  { id: "pergamin", name: "Pergamin", colors: ["#f3ecdc", "#3b5f9a", "#c0582e"] },
-];

@@ -29,7 +29,8 @@ function Atelier() {
 
   useEffect(() => setSt(load()), []);
   useEffect(() => { if (st) save(st); }, [st]);
-  useEffect(() => { if (st) document.documentElement.dataset.theme = st.theme; }, [st?.theme]);
+  const theme = st?.theme;
+  useEffect(() => { if (theme) document.documentElement.dataset['theme'] = theme; }, [theme]);
   if (!st) return <div className="min-h-screen bg-background" />;
 
   const s = streak(st.doneDays);
@@ -125,7 +126,7 @@ function Panel({ st, setSt, avg, streakN, busy, ask, goMentor }: {
             return (
               <div key={k.key}>
                 <div className="flex justify-between text-xs uppercase"><span>{k.label}</span>
-                  <span><b>{v || "—"}</b><span className="text-muted-foreground">/100</span>{d !== 0 && <span className={d > 0 ? "text-chart-3 ml-1" : "text-destructive ml-1"}>{d > 0 ? "+" : ""}{d}</span>}</span>
+                  <span><b>{v}</b><span className="text-muted-foreground">/100</span>{d !== 0 && <span className={d > 0 ? "text-chart-3 ml-1" : "text-destructive ml-1"}>{d > 0 ? "+" : ""}{d}</span>}</span>
                 </div>
                 <div className="bar-track mt-1 h-3 overflow-hidden rounded-sm border border-border"><div className="bar-fill h-full" style={{ width: `${v}%` }} /></div>
               </div>
