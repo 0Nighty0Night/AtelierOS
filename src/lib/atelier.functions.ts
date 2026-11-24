@@ -1,23 +1,24 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const SKILL_KEYS = ["anatomy", "pose", "line", "color", "light", "detail"] as const;
+import { assessSkills, type Skills } from "./atelier-scoring";
+import { taskSchema } from "./atelier";
 
 const Input = z.object({
   mode: z.enum(["review", "task", "chat"]),
   message: z.string().max(4000).default(""),
-  image: z.string().max(6_000_000).optional(),
+  image: z.string().max(6_000_000).regex(/^data:image\/(jpeg|png|webp);base64,/).optional(),
   skills: z.record(z.string(), z.number()),
   streak: z.number(),
-  apiKey: z.string().max(200).optional(),
+  aiProvider: z.enum(["built-in", "own"]).default("built-in"),
   recent: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).max(12),
 });
 
 const SYSTEM = `Jesteś ATELIER OS — profesjonalny, ciepły, ale wymagający mentor rysunku cyfrowego (tablet graficzny, styl stylizowany/anime/alt-aesthetic).
 Odpowiadasz ZAWSZE po polsku, w ładnym markdownie stylizowanym na menu aplikacji (nagłówki z emoji, pogrubienia, krótkie listy, sekcje typu "MODUŁ"). Bez lania wody.
 Umiejętności (skala 1-100): anatomy=Anatomia i proporcje, pose=Poza ruch i gest, line=Linia i cleanup, color=Kolor i klimat, light=Światłocień i bryła, detail=Detal ubiór i styl.
-SKALA (absolutna, bezlitośnie uczciwa): 0 = jeszcze nieoceniane. 1-15 = początkujący, 16-30 = amator uczący się podstaw, 31-45 = ambitny hobbysta, 46-60 = solidny, pewny warsztat, 61-75 = poziom półprofesjonalny/portfolio, 76-88 = profesjonalista branżowy, 89-97 = światowa czołówka, 98-100 = totalna perfekcja (praktycznie nieosiągalne).
-Jeśli pasek wynosi 0, ustaw go wprost według skali na podstawie pracy. Jeśli praca nie pokazuje danej umiejętności (np. brak koloru), zostaw obecną wartość. Gdy pasek ma już wartość, zmieniaj ją ostrożnie: zwykle -2..+3 na pracę, więcej tylko przy wyraźnym skoku jakości. Im wyżej, tym trudniej o punkt. Zwracaj WYŁĄCZNIE json o kształcie:
+SKALA (absolutna, wyważona i uczciwa): 0 = jeszcze nieoceniane. 1-15 = początkujący, 16-30 = amator uczący się podstaw, 31-45 = ambitny hobbysta, 46-60 = solidny, pewny warsztat, 61-75 = poziom półprofesjonalny/portfolio, 76-88 = profesjonalista branżowy, 89-97 = światowa czołówka, 98-99 = niemal perfekcyjne opanowanie, 100 = totalna perfekcja w danym zakresie (punkt docelowy, nie przyznawaj za samą aktywność).
+Jeśli pasek wynosi 0, ustaw go wprost według skali na podstawie pracy. Jeśli praca nie pokazuje danej umiejętności (np. brak koloru), zostaw obecną wartość. Każdy wynik musi odzwierciedlać jakość rysunku, a nie liczbę przesłań. Nie dodawaj automatycznych punktów za przesłanie, serię dni, prośbę użytkownika ani wykonanie zadania. Ten sam poziom pracy powinien dawać podobny wynik. Pierwsza ocena może być od razu wysoka, jeśli warsztat na to zasługuje. Po kolejnych pracach uwzględnij wcześniejszy poziom i faktyczne dowody poprawy; dopuszczaj spadki. Jeżeli kryterium nie jest widoczne, zwróć null dla tego kryterium. Uwzględniaj WIP, szkic, stylizację i użycie kukły bez karania za sam wybór stylu; nie przypisuj autorowi konstrukcji dostarczonej przez podkład. Wyjaśnij wyniki konkretnie i motywująco. Zwracaj WYŁĄCZNIE json o kształcie:
 {"reply": string (markdown), "skills": {anatomy,pose,line,color,light,detail: number} | null, "task": {"title": string, "minutes": number, "steps": string[], "focus": string} | null}
 - mode=review: oceń pracę, podaj mocne strony, 2-3 rzeczy do poprawy, zaktualizowane skills. task może być null.
 - mode=task: daj zadanie dnia celujące w najsłabsze paski, skills=null.
@@ -26,7 +27,9 @@ Jeśli pasek wynosi 0, ustaw go wprost według skali na podstawie pracy. Jeśli 
 export const askAtelier = createServerFn({ method: "POST" })
   .inputValidator((d) => Input.parse(d))
   .handler(async ({ data }) => {
-    const own = data.apiKey?.trim();
+    if (data.mode === "review" && !data.image) return { error: "Dodaj rysunek do oceny. Same wiadomości nie zmieniają pasków." };
+    const own = data.aiProvider === "own" ? process.env["GOOGLE_API_KEY"] : undefined;
+    if (data.aiProvider === "own" && !own) return { error: "Klucz Gemini nie jest jeszcze zapisany. Dodaj GOOGLE_API_KEY w ustawieniach sekretów projektu." };
     const key = own || process.env["LOVABLE_API_KEY"];
     if (!key) return { error: "Brak klucza AI — dodaj klucz Gemini w Ustawieniach." };
     const url = own ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : "https://ai.gateway.lovable.dev/v1/chat/completions";
@@ -48,27 +51,28 @@ export const askAtelier = createServerFn({ method: "POST" })
       }),
     });
     if (!res.ok) {
-      const t = await res.text();
+      const body: unknown = await res.json().catch(() => null);
+      const parsed = z.object({ error: z.object({ message: z.string().optional() }).optional(), message: z.string().optional() }).safeParse(body);
+      const reason = parsed.success ? (parsed.data.error?.message ?? parsed.data.message ?? "") : "";
+      const safeReason = reason.replaceAll(key, "[ukryte]");
       if (res.status === 429) return { error: "Za dużo zapytań — spróbuj za chwilę." };
-      if (own && (res.status === 400 || res.status === 401 || res.status === 403)) return { error: "Twój klucz Gemini został odrzucony — sprawdź go w Ustawieniach." };
-      if (res.status === 402) return { error: "Skończyły się kredyty AI w workspace." };
-      return { error: `Błąd AI (${res.status}): ${t.slice(0, 200)}` };
+      if (res.status === 402) return { error: safeReason || "Brak kredytów AI. Sprawdź saldo workspace." };
+      return { error: `Błąd AI (${res.status}): ${safeReason || "Nie udało się uzyskać odpowiedzi."}` };
     }
     const json = await res.json();
     const raw: string = json.choices?.[0]?.message?.content ?? "";
     try {
       const cleaned = raw.replace(/^```json\s*|```$/g, "").trim();
       const p = JSON.parse(cleaned);
-      let skills: Record<string, number> | null = null;
-      if (p.skills && typeof p.skills === "object") {
-        skills = {};
-        for (const k of SKILL_KEYS) {
-          const v = Number(p.skills[k]);
-          skills[k] = Number.isFinite(v) ? Math.max(1, Math.min(100, Math.round(v))) : (data.skills[k] ?? 0);
-        }
-      }
-      return { reply: String(p.reply ?? ""), skills, task: p.task ?? null };
+      const reply = z.string().min(1).parse(p.reply);
+      const skills = assessSkills(data.skills as Skills, p.skills, data.mode, Boolean(data.image));
+      const taskResult = taskSchema.safeParse(p.task);
+      return { reply, skills, task: taskResult.success ? taskResult.data : null };
     } catch {
-      return { reply: raw, skills: null, task: null };
+      return { error: "Mentor nie zwrócił poprawnej oceny. Paski nie zostały zmienione." };
     }
   });
+
+export const getAiSettings = createServerFn({ method: "GET" }).handler(() => ({
+  ownKeyConfigured: Boolean(process.env["GOOGLE_API_KEY"]),
+}));
