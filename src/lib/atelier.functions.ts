@@ -4,6 +4,11 @@ import { z } from "zod";
 import { assessSkills, type Skills } from "./atelier-scoring";
 import { taskSchema } from "./atelier";
 
+// Model ids: own Gemini key talks straight to Google AI Studio, built-in goes through the Lovable gateway.
+// gemini-2.0-flash and gemini-2.5-flash are retired by Google (HTTP 404); gemini-3.8-flash is often 503 there.
+export const OWN_MODEL_ID = "gemini-3.6-flash";
+export const BUILT_IN_MODEL_ID = "google/gemini-3.8-flash";
+
 const Input = z.object({
   mode: z.enum(["review", "task", "chat"]),
   message: z.string().max(4000).default(""),
@@ -33,7 +38,7 @@ export const askAtelier = createServerFn({ method: "POST" })
     const key = own || process.env["LOVABLE_API_KEY"];
     if (!key) return { error: "Brak klucza AI — dodaj klucz Gemini w Ustawieniach." };
     const url = own ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : "https://ai.gateway.lovable.dev/v1/chat/completions";
-    const model = own ? "gemini-2.5-flash" : "google/gemini-3.8-flash";
+    const model = own ? OWN_MODEL_ID : BUILT_IN_MODEL_ID;
     const ctx = `Kontekst: mode=${data.mode}, obecne paski=${JSON.stringify(data.skills)}, seria dni=${data.streak}, data=${new Date().toISOString().slice(0, 10)}.`;
     const userContent: unknown[] = [{ type: "text", text: `${ctx}\n\n${data.message || "(brak opisu)"}` }];
     if (data.image) userContent.push({ type: "image_url", image_url: { url: data.image } });
