@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Download, Upload } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Download, Upload, Power, Pause, Play, Moon, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { askAtelier, getAiSettings } from "@/lib/atelier.functions";
-import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES, parseBackup } from "@/lib/atelier";
+import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES, parseBackup, startSession, finishBoot, pauseSession, endSession, type SessionStatus } from "@/lib/atelier";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,6 +22,28 @@ export const Route = createFileRoute("/")({
 
 type Tab = "panel" | "mentor" | "galeria" | "ustawienia";
 
+const SESSION_LABELS: Record<SessionStatus, string> = {
+  offline: "OFFLINE",
+  booting: "BOOTING",
+  online: "ONLINE",
+  standby: "STANDBY",
+};
+
+const BOOT_LINES = [
+  "ATELIER BIOS v1.0 // INICJALIZACJA",
+  "CPU: KREATYWNOŚĆ ................. OK",
+  "PAMIĘĆ LOKALNA .................... OK",
+  "MODUŁ: ANATOMIA ................... OK",
+  "MODUŁ: LINIA I KOLOR .............. OK",
+  "MODUŁ: ŚWIATŁOCIEŃ ................ OK",
+  "MONTOWANIE GALERII PRAC ........... OK",
+  "PRZYWRACANIE HISTORII POSTĘPÓW .... OK",
+  "ŁĄCZENIE Z MENTOREM AI ............ OK",
+  "KALIBRACJA ZADANIA DNIA ........... OK",
+  "PROTOKÓŁ: MENTOR & PROGRES ........ AKTYWNY",
+  "SYSTEM GOTOWY. DOBREGO RYSOWANIA_",
+];
+
 function Atelier() {
   const [st, setSt] = useState<State | null>(null);
   const [tab, setTab] = useState<Tab>("panel");
@@ -32,13 +54,30 @@ function Atelier() {
   useEffect(() => { if (st) { try { save(st); } catch { setErr("Brak miejsca na zapis. Wyeksportuj kopię danych w Ustawieniach; ostatnie zmiany są teraz tylko w pamięci."); } } }, [st]);
   const theme = st?.theme;
   useEffect(() => { if (theme) document.documentElement.dataset['theme'] = theme; }, [theme]);
+  const finishBootSequence = useCallback(() => {
+    setSt((p) => p ? { ...p, session: finishBoot(p.session) } : p);
+  }, []);
   if (!st) return <div className="min-h-screen bg-background" />;
 
   const s = streak(st.doneDays);
   const avg = Math.round(SKILLS.reduce((a, k) => a + st.skills[k.key], 0) / SKILLS.length);
+  const status = st.session.status;
+
+  function startDay() {
+    if (!busy) setSt((p) => p ? { ...p, session: startSession(p.session) } : p);
+  }
+  function pauseDay() {
+    if (!busy) setSt((p) => p ? { ...p, session: pauseSession(p.session) } : p);
+  }
+  function endDay() {
+    if (busy) return;
+    if (window.confirm("Zakończyć dzisiejszą sesję? Stacja przejdzie w OFFLINE, a wszystkie postępy pozostaną zapisane.")) {
+      setSt((p) => p ? { ...p, session: endSession(p.session) } : p);
+    }
+  }
 
   async function ask(mode: "review" | "task" | "chat", message: string, image?: string) {
-    if (!st || busy) return;
+    if (!st || busy || st.session.status !== "online") return;
     setBusy(true); setErr(null);
     const userMsg: Msg = { role: "user", content: message || (mode === "task" ? "Daj zadanie na dziś." : "Oceń moją pracę."), ...(image ? { image } : {}), at: Date.now() };
     setSt((p) => p && { ...p, messages: [...p.messages, userMsg] });
@@ -62,33 +101,123 @@ function Atelier() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground paper-grain pb-24">
-      <header className="mx-auto max-w-2xl px-4 pt-6 pb-3">
-        <h1 className="text-2xl font-extrabold tracking-normal">🎨 ATELIER OS <span className="text-primary">v1.0</span></h1>
-        <p className="mt-1 text-[11px] uppercase text-muted-foreground flex flex-wrap gap-x-2 gap-y-1 items-center">
-          <span>Status:</span><span className="chip text-primary">ONLINE<span className="blink">_</span></span>
-          <span>Tryb:</span><span className="chip">MENTOR &amp; PROGRES</span>
-          <span className="chip">{today().split("-").reverse().join(".")}</span>
-        </p>
-      </header>
+    <div className="min-h-screen bg-background text-foreground paper-grain">
+      <div className="pb-24" inert={status !== "online"} aria-hidden={status !== "online"}>
+        <header className="mx-auto max-w-2xl px-4 pt-6 pb-3">
+          <h1 className="text-2xl font-extrabold tracking-normal">🎨 ATELIER OS <span className="text-primary">v1.0</span></h1>
+          <p className="mt-1 text-[11px] uppercase text-muted-foreground flex flex-wrap gap-x-2 gap-y-1 items-center">
+            <span>Status:</span>
+            <span className={`chip inline-flex items-center ${status === "online" ? "text-chart-3" : status === "standby" ? "text-accent" : "text-muted-foreground"}`}>
+              {status === "online" && <span className="status-dot" />}{SESSION_LABELS[status]}{status === "booting" && <span className="blink">_</span>}
+            </span>
+            <span>Tryb:</span><span className="chip">{status === "standby" ? "SESJA WSTRZYMANA" : "MENTOR & PROGRES"}</span>
+            <span className="chip">{today().split("-").reverse().join(".")}</span>
+          </p>
+          {status === "online" && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled={busy} onClick={pauseDay} className="gap-2"><Pause size={15} />Wstrzymaj · STANDBY</Button>
+              <Button variant="outline" size="sm" disabled={busy} onClick={endDay} className="gap-2"><Power size={15} />Zakończ dzień · OFFLINE</Button>
+            </div>
+          )}
+        </header>
 
-      <main className="mx-auto max-w-2xl px-4">
-        {err && <div className="mb-3 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm flex justify-between gap-2"><span>{err}</span><Button variant="unstyled" onClick={() => setErr(null)}><X size={16} /></Button></div>}
-        {tab === "panel" && <Panel st={st} setSt={setSt} avg={avg} streakN={s} busy={busy} ask={ask} goMentor={() => setTab("mentor")} />}
-        {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} />}
-        {tab === "galeria" && <Gallery st={st} />}
-        {tab === "ustawienia" && <SettingsView st={st} setSt={setSt} />}
-      </main>
+        <main className="mx-auto max-w-2xl px-4">
+          {err && <div className="mb-3 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm flex justify-between gap-2"><span>{err}</span><Button variant="unstyled" onClick={() => setErr(null)}><X size={16} /></Button></div>}
+          {tab === "panel" && <Panel st={st} setSt={setSt} avg={avg} streakN={s} busy={busy} ask={ask} goMentor={() => setTab("mentor")} />}
+          {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} />}
+          {tab === "galeria" && <Gallery st={st} />}
+          {tab === "ustawienia" && <SettingsView st={st} setSt={setSt} />}
+        </main>
 
-      <nav className="fixed bottom-0 inset-x-0 border-t border-border bg-card/95 backdrop-blur">
-        <div className="mx-auto max-w-2xl grid grid-cols-4">
-          {([["panel", "Panel", LayoutDashboard], ["mentor", "Mentor", MessageSquare], ["galeria", "Galeria", Images], ["ustawienia", "Ustawienia", Cog]] as const).map(([k, l, I]) => (
-            <Button variant="unstyled" key={k} onClick={() => setTab(k)} className={`flex flex-col items-center gap-1 py-3 text-[10px] uppercase tracking-normalr ${tab === k ? "text-accent" : "text-muted-foreground"}`}>
-              <I size={20} />{l}
-            </Button>
-          ))}
+        <nav className="fixed bottom-0 inset-x-0 border-t border-border bg-card/95 backdrop-blur">
+          <div className="mx-auto max-w-2xl grid grid-cols-4">
+            {([["panel", "Panel", LayoutDashboard], ["mentor", "Mentor", MessageSquare], ["galeria", "Galeria", Images], ["ustawienia", "Ustawienia", Cog]] as const).map(([k, l, I]) => (
+              <Button variant="unstyled" key={k} onClick={() => setTab(k)} className={`flex flex-col items-center gap-1 py-3 text-[10px] uppercase tracking-normalr ${tab === k ? "text-accent" : "text-muted-foreground"}`}>
+                <I size={20} />{l}
+              </Button>
+            ))}
+          </div>
+        </nav>
+      </div>
+      <div className={`session-shade session-shade-${status}`} aria-hidden="true" />
+      <SessionOverlay status={status} onStart={startDay} onBooted={finishBootSequence} onEnd={endDay} />
+    </div>
+  );
+}
+
+function BootScreen({ onComplete }: { onComplete: () => void }) {
+  const [lines, setLines] = useState<string[]>([]);
+
+  useEffect(() => {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timers = BOOT_LINES.map((line, index) => window.setTimeout(() => {
+      setLines((current) => [...current, line]);
+    }, reduced ? 0 : index * 145));
+    const finish = window.setTimeout(onComplete, reduced ? 250 : BOOT_LINES.length * 145 + 500);
+    return () => { timers.forEach(window.clearTimeout); window.clearTimeout(finish); };
+  }, [onComplete]);
+
+  const progress = Math.max(4, Math.round((lines.length / BOOT_LINES.length) * 100));
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="status" aria-label="Uruchamianie Atelier OS">
+      <div className="session-window w-full max-w-xl p-4 sm:p-6">
+        <div className="mb-5 flex items-center justify-between gap-3 border-b border-border pb-3 text-[10px] uppercase text-muted-foreground">
+          <span className="inline-flex items-center gap-2"><Terminal size={15} className="text-primary" />Atelier BIOS</span>
+          <span>BOOT SEQUENCE // {String(progress).padStart(3, "0")}%</span>
         </div>
-      </nav>
+        <div className="boot-log flex flex-col justify-end overflow-hidden font-mono text-[10px] leading-6 text-primary sm:text-xs" aria-live="polite">
+          {lines.map((line, index) => <div key={line} className="boot-line"><span className="mr-2 text-muted-foreground">{String(index).padStart(2, "0")}</span>{line}</div>)}
+          {lines.length < BOOT_LINES.length && <span className="blink text-accent">▌</span>}
+        </div>
+        <div className="mt-5 h-2 overflow-hidden rounded-sm border border-border bg-muted">
+          <div className="boot-progress h-full bg-primary" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="mt-3 text-center text-[10px] uppercase text-muted-foreground">Nie wyłączaj stacji · trwa synchronizacja modułów</p>
+      </div>
+    </div>
+  );
+}
+
+function SessionOverlay({ status, onStart, onBooted, onEnd }: {
+  status: SessionStatus;
+  onStart: () => void;
+  onBooted: () => void;
+  onEnd: () => void;
+}) {
+  useEffect(() => {
+    if (status === "online") return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [status]);
+
+  if (status === "online") return null;
+  if (status === "booting") return <BootScreen onComplete={onBooted} />;
+  const standby = status === "standby";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="session-title">
+      <div className="session-window w-full max-w-md p-6 text-center sm:p-8">
+        <div className="mb-5 flex items-center justify-between border-b border-border pb-3 text-[10px] uppercase text-muted-foreground">
+          <span>ATELIER OS // SESSION</span><span>{SESSION_LABELS[status]}</span>
+        </div>
+        <div className={`mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-primary text-primary ${standby ? "standby-icon" : ""}`}>
+          {standby ? <Moon size={28} /> : <Power size={28} />}
+        </div>
+        <p className="text-[10px] uppercase text-accent">{standby ? "Pamięć sesji aktywna" : "System gotowy do inicjalizacji"}</p>
+        <h2 id="session-title" className="mt-2 text-xl font-semibold">{standby ? "Stacja wstrzymana" : "Stacja uśpiona"}</h2>
+        <p className="mx-auto mt-3 max-w-sm text-xs leading-6 text-muted-foreground">
+          {standby
+            ? "Mentor odpoczywa. Twoje zadanie i postępy czekają — wznów sesję albo zakończ dzień."
+            : "Uruchom mentora, moduły postępu i zadanie na dziś. Wszystkie zapisane prace pozostaną na swoim miejscu."}
+        </p>
+        <div className="mt-6 grid gap-2">
+          <Button autoFocus onClick={onStart} className="gap-2">
+            {standby ? <Play size={17} /> : <Power size={17} />}{standby ? "Wznów sesję" : "Rozpocznij dzień"}
+          </Button>
+          {standby && <Button variant="outline" onClick={onEnd} className="gap-2"><Power size={16} />Zakończ dzień · OFFLINE</Button>}
+        </div>
+        <p className="mt-5 text-[10px] uppercase text-muted-foreground">{standby ? "STANDBY // niski pobór mocy" : "INICJALIZUJ SYSTEM // pamięć lokalna gotowa"}</p>
+      </div>
     </div>
   );
 }

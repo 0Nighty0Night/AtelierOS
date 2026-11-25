@@ -18,7 +18,14 @@ const score = z.number().finite().min(0).max(100);
 const skillsSchema = z.object({ anatomy: score, pose: score, line: score, color: score, light: score, detail: score });
 export const taskSchema = z.object({ title: z.string(), minutes: z.number().positive(), steps: z.array(z.string()), focus: z.string() });
 const imageSchema = z.string().regex(/^data:image\/(jpeg|png|webp);base64,/);
+export const sessionSchema = z.object({
+  status: z.enum(['offline', 'booting', 'online', 'standby']),
+  date: z.string().nullable(),
+}).default({ status: 'offline', date: null });
+export type Session = z.infer<typeof sessionSchema>;
+export type SessionStatus = Session['status'];
 const stateSchema = z.object({
+  session: sessionSchema,
   skills: skillsSchema,
   history: z.array(z.object({ date: z.string(), skills: skillsSchema })),
   task: taskSchema.extend({ date: z.string(), done: z.boolean().optional() }).nullable(),
@@ -33,13 +40,29 @@ export type Task = NonNullable<State['task']>;
 export type Msg = State['messages'][number];
 const iso = (d: Date) => d.toLocaleDateString('sv-SE');
 export const today = () => iso(new Date());
+export function startSession(session: Session, date = today()): Session {
+  if (session.status !== 'offline' && session.status !== 'standby') return session;
+  return { status: 'booting', date: session.date ?? date };
+}
+export function finishBoot(session: Session): Session {
+  return session.status === 'booting' ? { ...session, status: 'online' } : session;
+}
+export function pauseSession(session: Session): Session {
+  return session.status === 'online' ? { ...session, status: 'standby' } : session;
+}
+export function endSession(session: Session): Session {
+  return session.status === 'online' || session.status === 'standby' ? { status: 'offline', date: null } : session;
+}
 export const initialState = (): State => ({
+  session: { status: 'offline', date: null },
   skills: zeroSkills(), history: [], task: null, doneDays: [], messages: [], gallery: [], theme: 'atrament', aiProvider: 'built-in',
 });
 const KEY = 'atelieros-v2';
 export function parseBackup(value: unknown): State {
   const s = stateSchema.parse(value);
   if (!s.gallery.length) { s.skills = zeroSkills(); s.history = []; }
+  // A reload cannot resume a half-finished animation; return safely to the start screen.
+  if (s.session.status === 'booting') s.session = { status: 'offline', date: null };
   return s;
 }
 export function load(): State {

@@ -174,11 +174,62 @@
 .ai-md blockquote { border-left: 2px solid var(--color-primary); padding-left: 0.6rem; color: var(--color-muted-foreground); }
 .blink { animation: blink 1s steps(2) infinite; } @keyframes blink { 50% { opacity: 0; } }
 
+.session-shade {
+  --session-opacity: 0;
+  --session-brightness: 1;
+  --session-saturation: 1;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--background);
+  opacity: var(--session-opacity);
+  backdrop-filter: brightness(var(--session-brightness)) saturate(var(--session-saturation));
+  transition: opacity 900ms ease, backdrop-filter 900ms ease;
+}
+.session-shade-booting { --session-opacity: 0.48; --session-brightness: 0.5; --session-saturation: 0.65; }
+.session-shade-standby { --session-opacity: 0.26; --session-brightness: 0.66; --session-saturation: 0.72; }
+.session-shade-offline { --session-opacity: 0.62; --session-brightness: 0.4; --session-saturation: 0.5; }
+.session-window {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--background), 0 0 36px var(--primary);
+}
+.session-window::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, var(--foreground) 4px);
+  opacity: 0.025;
+}
+.status-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.35rem;
+  border-radius: 999px;
+  background: currentColor;
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+@keyframes status-pulse { 50% { opacity: 0.3; transform: scale(0.75); } }
+.boot-log { min-height: 15rem; max-height: 42vh; }
+.boot-line { animation: boot-line-in 160ms steps(3) both; overflow-wrap: anywhere; }
+@keyframes boot-line-in { from { opacity: 0; transform: translateY(0.4rem); } to { opacity: 1; transform: translateY(0); } }
+.boot-progress { transition: width 150ms steps(3); }
+.standby-icon { animation: standby-breathe 3s ease-in-out infinite; }
+@keyframes standby-breathe { 50% { opacity: 0.45; transform: scale(0.96); } }
+
 .theme-swatch { width: 1.25rem; height: 1.25rem; border: 1px solid var(--border); border-radius: 50%; margin-right: -0.25rem; }
 .swatch-background { background: var(--background); }
 .swatch-primary { background: var(--primary); }
 .swatch-accent { background: var(--accent); }
 [data-theme="atrament"] { --background: oklch(0.14 0.012 260); --primary: oklch(0.68 0.16 250); --accent: oklch(0.78 0.15 65); }
-@media (prefers-reduced-motion: reduce) { .blink { animation: none; } .bar-fill { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .blink, .status-dot, .boot-line, .standby-icon { animation: none; }
+  .bar-fill, .boot-progress, .session-shade { transition: none; }
+}
 * { letter-spacing: 0; }
 .ai-md { overflow-wrap: anywhere; }
