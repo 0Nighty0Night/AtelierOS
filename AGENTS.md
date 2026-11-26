@@ -32,3 +32,4 @@ use the editor.
 - Atelier OS state lives in browser localStorage (src/lib/atelier.ts) for the prototype; move to Cloud when accounts/sync are needed.
 - AI mentor calls go through createServerFn in src/lib/atelier.functions.ts returning validated JSON {reply, skills, task}; use the existing gateway by default and server-held GOOGLE_API_KEY only when the user selects their own Gemini, so private keys never enter browser state or backups.
 - Keep image-review score normalization in src/lib/atelier-scoring.ts and validate imported state before saving, so chat/tasks and malformed backups cannot change assessment scores.
+- Keep session controls and boot UI inside Mentor; use endDayState for shutdown so only conversation data is cleared and all other tabs remain accessible.

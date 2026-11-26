@@ -53,6 +53,10 @@ export function pauseSession(session: Session): Session {
 export function endSession(session: Session): Session {
   return session.status === 'online' || session.status === 'standby' ? { status: 'offline', date: null } : session;
 }
+export function endDayState(state: State): State {
+  const session = endSession(state.session);
+  return session === state.session ? state : { ...state, session, messages: [] };
+}
 export const initialState = (): State => ({
   session: { status: 'offline', date: null },
   skills: zeroSkills(), history: [], task: null, doneDays: [], messages: [], gallery: [], theme: 'atrament', aiProvider: 'built-in',

@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Download, Upload, Power, Pause, Play, Moon, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { askAtelier, getAiSettings } from "@/lib/atelier.functions";
-import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES, parseBackup, startSession, finishBoot, pauseSession, endSession, type SessionStatus } from "@/lib/atelier";
+import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES, parseBackup, startSession, finishBoot, pauseSession, endDayState, type SessionStatus } from "@/lib/atelier";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -57,6 +57,13 @@ function Atelier() {
   const finishBootSequence = useCallback(() => {
     setSt((p) => p ? { ...p, session: finishBoot(p.session) } : p);
   }, []);
+  const sessionStatus = st?.session.status;
+  useEffect(() => {
+    if (sessionStatus !== "booting") return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timer = window.setTimeout(finishBootSequence, reduced ? 250 : BOOT_LINES.length * 145 + 500);
+    return () => window.clearTimeout(timer);
+  }, [sessionStatus, finishBootSequence]);
   if (!st) return <div className="min-h-screen bg-background" />;
 
   const s = streak(st.doneDays);
@@ -71,9 +78,8 @@ function Atelier() {
   }
   function endDay() {
     if (busy) return;
-    if (window.confirm("Zakończyć dzisiejszą sesję? Stacja przejdzie w OFFLINE, a wszystkie postępy pozostaną zapisane.")) {
-      setSt((p) => p ? { ...p, session: endSession(p.session) } : p);
-    }
+    setErr(null);
+    setSt((p) => p ? endDayState(p) : p);
   }
 
   async function ask(mode: "review" | "task" | "chat", message: string, image?: string) {
@@ -102,7 +108,7 @@ function Atelier() {
 
   return (
     <div className="min-h-screen bg-background text-foreground paper-grain">
-      <div className="pb-24" inert={status !== "online"} aria-hidden={status !== "online"}>
+      <div className="pb-24">
         <header className="mx-auto max-w-2xl px-4 pt-6 pb-3">
           <h1 className="text-2xl font-extrabold tracking-normal">🎨 ATELIER OS <span className="text-primary">v1.0</span></h1>
           <p className="mt-1 text-[11px] uppercase text-muted-foreground flex flex-wrap gap-x-2 gap-y-1 items-center">
@@ -113,18 +119,13 @@ function Atelier() {
             <span>Tryb:</span><span className="chip">{status === "standby" ? "SESJA WSTRZYMANA" : "MENTOR & PROGRES"}</span>
             <span className="chip">{today().split("-").reverse().join(".")}</span>
           </p>
-          {status === "online" && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled={busy} onClick={pauseDay} className="gap-2"><Pause size={15} />Wstrzymaj · STANDBY</Button>
-              <Button variant="outline" size="sm" disabled={busy} onClick={endDay} className="gap-2"><Power size={15} />Zakończ dzień · OFFLINE</Button>
-            </div>
-          )}
+
         </header>
 
         <main className="mx-auto max-w-2xl px-4">
           {err && <div className="mb-3 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm flex justify-between gap-2"><span>{err}</span><Button variant="unstyled" onClick={() => setErr(null)}><X size={16} /></Button></div>}
           {tab === "panel" && <Panel st={st} setSt={setSt} avg={avg} streakN={s} busy={busy} ask={ask} goMentor={() => setTab("mentor")} />}
-          {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} />}
+          {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} onStart={startDay} onPause={pauseDay} onEnd={endDay} />}
           {tab === "galeria" && <Gallery st={st} />}
           {tab === "ustawienia" && <SettingsView st={st} setSt={setSt} />}
         </main>
@@ -140,12 +141,11 @@ function Atelier() {
         </nav>
       </div>
       <div className={`session-shade session-shade-${status}`} aria-hidden="true" />
-      <SessionOverlay status={status} onStart={startDay} onBooted={finishBootSequence} onEnd={endDay} />
     </div>
   );
 }
 
-function BootScreen({ onComplete }: { onComplete: () => void }) {
+function BootScreen() {
   const [lines, setLines] = useState<string[]>([]);
 
   useEffect(() => {
@@ -153,14 +153,13 @@ function BootScreen({ onComplete }: { onComplete: () => void }) {
     const timers = BOOT_LINES.map((line, index) => window.setTimeout(() => {
       setLines((current) => [...current, line]);
     }, reduced ? 0 : index * 145));
-    const finish = window.setTimeout(onComplete, reduced ? 250 : BOOT_LINES.length * 145 + 500);
-    return () => { timers.forEach(window.clearTimeout); window.clearTimeout(finish); };
-  }, [onComplete]);
+    return () => { timers.forEach(window.clearTimeout); };
+  }, []);
 
   const progress = Math.max(4, Math.round((lines.length / BOOT_LINES.length) * 100));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="status" aria-label="Uruchamianie Atelier OS">
-      <div className="session-window w-full max-w-xl p-4 sm:p-6">
+    <div className="flex flex-1 flex-col justify-center p-4 sm:p-6" role="status" aria-label="Uruchamianie Atelier OS">
+      <div className="w-full">
         <div className="mb-5 flex items-center justify-between gap-3 border-b border-border pb-3 text-[10px] uppercase text-muted-foreground">
           <span className="inline-flex items-center gap-2"><Terminal size={15} className="text-primary" />Atelier BIOS</span>
           <span>BOOT SEQUENCE // {String(progress).padStart(3, "0")}%</span>
@@ -178,25 +177,16 @@ function BootScreen({ onComplete }: { onComplete: () => void }) {
   );
 }
 
-function SessionOverlay({ status, onStart, onBooted, onEnd }: {
+function SessionScreen({ status, onStart, onEnd }: {
   status: SessionStatus;
   onStart: () => void;
-  onBooted: () => void;
   onEnd: () => void;
 }) {
-  useEffect(() => {
-    if (status === "online") return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previous; };
-  }, [status]);
-
-  if (status === "online") return null;
-  if (status === "booting") return <BootScreen onComplete={onBooted} />;
+  if (status === "booting") return <BootScreen />;
   const standby = status === "standby";
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="session-title">
-      <div className="session-window w-full max-w-md p-6 text-center sm:p-8">
+    <div className="flex flex-1 items-center justify-center p-4" aria-labelledby="session-title">
+      <div className="w-full p-2 text-center sm:p-6">
         <div className="mb-5 flex items-center justify-between border-b border-border pb-3 text-[10px] uppercase text-muted-foreground">
           <span>ATELIER OS // SESSION</span><span>{SESSION_LABELS[status]}</span>
         </div>
@@ -204,14 +194,14 @@ function SessionOverlay({ status, onStart, onBooted, onEnd }: {
           {standby ? <Moon size={28} /> : <Power size={28} />}
         </div>
         <p className="text-[10px] uppercase text-accent">{standby ? "Pamięć sesji aktywna" : "System gotowy do inicjalizacji"}</p>
-        <h2 id="session-title" className="mt-2 text-xl font-semibold">{standby ? "Stacja wstrzymana" : "Stacja uśpiona"}</h2>
+        <h2 id="session-title" className="mt-2 text-xl font-semibold">{standby ? "Stacja wstrzymana" : "Mentor wyłączony"}</h2>
         <p className="mx-auto mt-3 max-w-sm text-xs leading-6 text-muted-foreground">
           {standby
-            ? "Mentor odpoczywa. Twoje zadanie i postępy czekają — wznów sesję albo zakończ dzień."
-            : "Uruchom mentora, moduły postępu i zadanie na dziś. Wszystkie zapisane prace pozostaną na swoim miejscu."}
+            ? "Rozmowa jest zachowana. Wznów sesję, gdy wrócisz do rysowania."
+            : "Nowy dzień, nowa rozmowa. Twoje prace, zadania i postępy pozostają zapisane."}
         </p>
         <div className="mt-6 grid gap-2">
-          <Button autoFocus onClick={onStart} className="gap-2">
+          <Button onClick={onStart} className="gap-2">
             {standby ? <Play size={17} /> : <Power size={17} />}{standby ? "Wznów sesję" : "Rozpocznij dzień"}
           </Button>
           {standby && <Button variant="outline" onClick={onEnd} className="gap-2"><Power size={16} />Zakończ dzień · OFFLINE</Button>}
@@ -277,7 +267,7 @@ function Panel({ st, setSt, avg, streakN, busy, ask, goMentor }: {
           </div>
         ) : <p className="text-sm text-muted-foreground">Brak zadania. Poproś mentora o rozgrzewkę.</p>}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="unstyled" disabled={busy} onClick={async () => { await ask("task", "Daj zadanie na dziś."); }} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+          <Button variant="unstyled" disabled={busy} onClick={async () => { if (st.session.status !== "online") { goMentor(); return; } await ask("task", "Daj zadanie na dziś."); }} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Target size={16} />}Daj zadanie na dziś
           </Button>
           {taskToday && !task?.done && (
@@ -309,26 +299,40 @@ function Stat({ label, value, small }: { label: string; value: React.ReactNode; 
   );
 }
 
-function Mentor({ st, busy, ask }: { st: State; busy: boolean; ask: (m: "review" | "task" | "chat", msg: string, img?: string) => Promise<void> }) {
+function Mentor({ st, busy, ask, onStart, onPause, onEnd }: {
+  st: State; busy: boolean;
+  ask: (m: "review" | "task" | "chat", msg: string, img?: string) => Promise<void>;
+  onStart: () => void; onPause: () => void; onEnd: () => void;
+}) {
   const [text, setText] = useState("");
   const [img, setImg] = useState<string | undefined>();
   const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [st.messages.length, busy]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [st.messages.length, busy]);
+  useEffect(() => { if (st.session.status === "offline") { setText(""); setImg(undefined); } }, [st.session.status]);
 
   async function send() {
-    if (busy || (!text.trim() && !img)) return;
+    if (busy || st.session.status !== "online" || (!text.trim() && !img)) return;
     const t = text, i = img; setText(""); setImg(undefined);
     await ask(i ? "review" : "chat", t, i);
   }
   return (
-    <div>
+    <section className="mentor-station session-window flex flex-col rounded-lg" aria-label="Czat Mentora">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-3">
+        <span className="inline-flex items-center gap-2 text-xs text-primary"><Terminal size={16} />MENTOR // {SESSION_LABELS[st.session.status]}</span>
+        {st.session.status === "online" && <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" disabled={busy} onClick={onPause} className="gap-2"><Pause size={14} />STANDBY</Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={onEnd} className="gap-2" title="Zakończ dzień i usuń rozmowę"><Power size={14} />OFFLINE</Button>
+        </div>}
+      </div>
+      {st.session.status !== "online" ? <SessionScreen status={st.session.status} onStart={onStart} onEnd={onEnd} /> : <>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
       {st.messages.length === 0 && (
         <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
           Wyślij zdjęcie lub zrzut swojej pracy z krótkim opisem (np. „siedząca dziewczyna, niebiesko-czarne włosy, WIP na kukle”). Mentor oceni ją i zaktualizuje Twoje paski.
         </div>
       )}
-      <div className="space-y-3 mb-40">
+      <div className="space-y-3 mt-3">
         {st.messages.map((m, i) => (
           <div key={i} className={m.role === "user" ? "ml-10 rounded-lg bg-primary p-3 text-sm text-primary-foreground" : "text-sm ai-md"}>
             {m.image && <img src={m.image} alt="Twoja praca" className="mb-2 max-h-64 rounded" />}
@@ -338,8 +342,9 @@ function Mentor({ st, busy, ask }: { st: State; busy: boolean; ask: (m: "review"
         {busy && <p className="text-xs text-accent">▌ Mentor analizuje<span className="blink">...</span></p>}
         <div ref={endRef} />
       </div>
-      <div className="fixed bottom-[68px] inset-x-0 px-4">
-        <div className="mx-auto max-w-2xl rounded-lg border border-border bg-card p-2">
+      </div>
+      <div className="shrink-0 border-t border-border p-2">
+        <div className="bg-card">
           {img && <div className="relative mb-2 inline-block"><img src={img} alt="Podgląd" className="h-20 rounded" /><Button variant="unstyled" onClick={() => setImg(undefined)} className="absolute -top-2 -right-2 rounded-full bg-destructive p-0.5 text-destructive-foreground"><X size={12} /></Button></div>}
           <div className="flex items-end gap-2">
             <Button variant="unstyled" onClick={() => fileRef.current?.click()} className="p-2 text-muted-foreground" aria-label="Dodaj obraz"><ImagePlus size={20} /></Button>
@@ -352,7 +357,8 @@ function Mentor({ st, busy, ask }: { st: State; busy: boolean; ask: (m: "review"
           </div>
         </div>
       </div>
-    </div>
+      </>}
+    </section>
   );
 }
 
