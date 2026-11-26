@@ -190,7 +190,15 @@
 .session-shade-booting { --session-opacity: 0.08; }
 .session-shade-standby { --session-opacity: 0.12; }
 .session-shade-offline { --session-opacity: 0.22; }
-.mentor-station { height: calc(100dvh - 220px); min-height: 420px; }
+.mentor-station {
+  height: calc(100dvh - 132px);
+  min-height: 420px;
+  width: 100vw;
+  max-width: 100vw;
+  margin-inline: calc(50% - 50vw);
+  border-radius: 0;
+  border-inline: none;
+}
 .session-window {
   position: relative;
   overflow: hidden;
