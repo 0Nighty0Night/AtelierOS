@@ -234,3 +234,26 @@
 }
 * { letter-spacing: 0; }
 .ai-md { overflow-wrap: anywhere; }
+
+:root[data-custom-colors="true"] {
+  --background: oklch(from var(--custom-background) l c h);
+  --accent: oklch(from var(--custom-accent) l c h);
+  --foreground: oklch(0.97 0 0);
+  --primary: var(--accent);
+  --accent-foreground: oklch(0.97 0 0);
+  --primary-foreground: var(--accent-foreground);
+  --card: color-mix(in oklch, var(--background) 94%, var(--foreground));
+  --popover: var(--card);
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --muted: color-mix(in oklch, var(--background) 88%, var(--foreground));
+  --muted-foreground: color-mix(in oklch, var(--foreground) 75%, var(--background));
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --border: color-mix(in oklch, var(--background) 65%, var(--foreground));
+  --input: var(--border);
+  --ring: var(--accent);
+  --chart-1: var(--accent);
+}
+:root[data-custom-colors="true"][data-custom-light="true"] { --foreground: oklch(0.15 0 0); }
+:root[data-custom-colors="true"][data-custom-accent-light="true"] { --accent-foreground: oklch(0.15 0 0); }

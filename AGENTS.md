@@ -33,3 +33,4 @@ use the editor.
 - AI mentor calls go through createServerFn in src/lib/atelier.functions.ts returning validated JSON {reply, skills, task}; use the existing gateway by default and server-held GOOGLE_API_KEY only when the user selects their own Gemini, so private keys never enter browser state or backups.
 - Keep image-review score normalization in src/lib/atelier-scoring.ts and validate imported state before saving, so chat/tasks and malformed backups cannot change assessment scores.
 - Keep session controls and boot UI inside Mentor; use endDayState for shutdown so only conversation data is cleared and all other tabs remain accessible.
+- Store validated custom colors with prototype state and apply them through root semantic CSS tokens, deriving surface and foreground colors to keep light and dark palettes readable.

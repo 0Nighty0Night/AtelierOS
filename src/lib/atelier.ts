@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { zeroSkills } from './atelier-scoring';
+import { DEFAULT_COLORS } from './atelier-theme';
 export type { Skills } from './atelier-scoring';
 export const SKILLS = [
   { key: 'anatomy', label: 'Anatomia i proporcje' },
@@ -33,6 +34,11 @@ const stateSchema = z.object({
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string(), image: imageSchema.optional(), at: z.number() })),
   gallery: z.array(z.object({ image: imageSchema, date: z.string(), note: z.string() })),
   theme: z.enum(['atrament', 'sakura', 'terminal', 'neon', 'pergamin']).default('atrament'),
+  customColors: z.object({
+    background: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    accent: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    enabled: z.boolean(),
+  }).default(DEFAULT_COLORS),
   aiProvider: z.enum(['built-in', 'own']).default('built-in'),
 });
 export type State = z.infer<typeof stateSchema>;
@@ -59,7 +65,7 @@ export function endDayState(state: State): State {
 }
 export const initialState = (): State => ({
   session: { status: 'offline', date: null },
-  skills: zeroSkills(), history: [], task: null, doneDays: [], messages: [], gallery: [], theme: 'atrament', aiProvider: 'built-in',
+  skills: zeroSkills(), history: [], task: null, doneDays: [], messages: [], gallery: [], theme: 'atrament', customColors: { ...DEFAULT_COLORS }, aiProvider: 'built-in',
 });
 const KEY = 'atelieros-v2';
 export function parseBackup(value: unknown): State {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Download, Upload, Power, Pause, Play, Moon, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isLightColor } from "@/lib/atelier-theme";
 import { askAtelier, getAiSettings } from "@/lib/atelier.functions";
 import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES, parseBackup, startSession, finishBoot, pauseSession, endDayState, type SessionStatus } from "@/lib/atelier";
 
@@ -54,6 +55,19 @@ function Atelier() {
   useEffect(() => { if (st) { try { save(st); } catch { setErr("Brak miejsca na zapis. Wyeksportuj kopię danych w Ustawieniach; ostatnie zmiany są teraz tylko w pamięci."); } } }, [st]);
   const theme = st?.theme;
   useEffect(() => { if (theme) document.documentElement.dataset['theme'] = theme; }, [theme]);
+  const customColors = st?.customColors;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!customColors?.enabled) {
+      delete root.dataset['customColors'];
+      return;
+    }
+    root.style.setProperty('--custom-background', customColors.background);
+    root.style.setProperty('--custom-accent', customColors.accent);
+    root.dataset['customColors'] = 'true';
+    root.dataset['customLight'] = String(isLightColor(customColors.background));
+    root.dataset['customAccentLight'] = String(isLightColor(customColors.accent));
+  }, [customColors]);
   const finishBootSequence = useCallback(() => {
     setSt((p) => p ? { ...p, session: finishBoot(p.session) } : p);
   }, []);
@@ -392,12 +406,33 @@ function SettingsView({ st, setSt }: { st: State; setSt: React.Dispatch<React.Se
       <Section title="🎨 Motyw">
         <div className="grid grid-cols-2 gap-2">
           {THEMES.map((t) => (
-            <Button variant="unstyled" key={t.id} onClick={() => setSt((p) => p && { ...p, theme: t.id })}
-              className={`flex items-center gap-2 rounded border p-2 text-left text-sm ${st.theme === t.id ? "border-accent" : "border-border"}`}>
+            <Button variant="unstyled" key={t.id} onClick={() => setSt((p) => p && { ...p, theme: t.id, customColors: { ...p.customColors, enabled: false } })}
+              className={`flex items-center gap-2 rounded border p-2 text-left text-sm ${st.theme === t.id && !st.customColors.enabled ? "border-accent" : "border-border"}`}>
               <span className="flex">{["background", "primary", "accent"].map((role) => <span key={role} data-theme={t.id} className={`theme-swatch swatch-${role}`} />)}</span>
               <span className="ml-2">{t.name}</span>
             </Button>
           ))}
+        </div>
+        <div className="mt-4 border-t border-border pt-4">
+          <label className="flex items-center justify-between gap-3 text-sm font-semibold">
+            Własny schemat
+            <input type="checkbox" aria-label="Własny schemat" checked={st.customColors.enabled}
+              onChange={(e) => setSt((p) => p && { ...p, customColors: { ...p.customColors, enabled: e.target.checked } })}
+              className="h-4 w-4 accent-accent" />
+          </label>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            {([['background', 'Kolor tła'], ['accent', 'Kolor akcentu']] as const).map(([key, label]) => (
+              <label key={key} className="flex min-w-0 flex-col gap-2 text-xs text-muted-foreground">
+                {label}
+                <div className="flex items-center gap-2">
+                  <input type="color" aria-label={label} value={st.customColors[key]}
+                    onChange={(e) => { const color = e.target.value; setSt((p) => p && { ...p, customColors: { ...p.customColors, [key]: color, enabled: true } }); }}
+                    className="h-10 w-12 shrink-0 cursor-pointer rounded border border-border bg-card p-1" />
+                  <span className="text-[11px] uppercase">{st.customColors[key]}</span>
+                </div>
+              </label>
+            ))}
+          </div>
         </div>
       </Section>
       <Section title="🔑 Połączenie z Gemini">
@@ -417,7 +452,7 @@ function SettingsView({ st, setSt }: { st: State; setSt: React.Dispatch<React.Se
             try { const d = parseBackup(JSON.parse(await f.text())); if (confirm("Zastąpić aktualne dane danymi z kopii?")) { setSt(d); setNotice("Kopia została wczytana."); } } catch { alert("Niepoprawny plik."); }
             e.target.value = "";
           }} />
-          <Button variant="unstyled" onClick={() => { if (confirm("Wyczyścić wszystkie postępy?")) setSt((p) => p && { ...initialState(), theme: p.theme, aiProvider: p.aiProvider }); }} className="rounded border border-destructive px-3 py-2 text-destructive">Reset postępów</Button>
+          <Button variant="unstyled" onClick={() => { if (confirm("Wyczyścić wszystkie postępy?")) setSt((p) => p && { ...initialState(), theme: p.theme, customColors: p.customColors, aiProvider: p.aiProvider }); }} className="rounded border border-destructive px-3 py-2 text-destructive">Reset postępów</Button>
         </div>
       </Section>
     </>
