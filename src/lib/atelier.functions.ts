@@ -1,13 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assessSkills, type Skills } from "./atelier-scoring";
 import { taskSchema } from "./atelier";
 
-// Model ids: own Gemini key talks straight to Google AI Studio, built-in goes through the Lovable gateway.
+// Every user talks directly to Google AI Studio using their own Gemini API key stored in user_ai_keys.
 // gemini-2.0-flash and gemini-2.5-flash are retired by Google (HTTP 404); gemini-3.8-flash is often 503 there.
 export const OWN_MODEL_ID = "gemini-3.6-flash";
-export const BUILT_IN_MODEL_ID = "google/gemini-3.8-flash";
 
 const Input = z.object({
   mode: z.enum(["review", "task", "chat"]),
@@ -15,7 +15,6 @@ const Input = z.object({
   image: z.string().max(6_000_000).regex(/^data:image\/(jpeg|png|webp);base64,/).optional(),
   skills: z.record(z.string(), z.number()),
   streak: z.number(),
-  aiProvider: z.enum(["built-in", "own"]).default("built-in"),
   recent: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).max(12),
 });
 
@@ -30,15 +29,20 @@ Jeśli pasek wynosi 0, ustaw go wprost według skali na podstawie pracy. Jeśli 
 - mode=chat: rozmowa/pomysły/systemy; skills i task zwykle null.`;
 
 export const askAtelier = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((d) => Input.parse(d))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     if (data.mode === "review" && !data.image) return { error: "Dodaj rysunek do oceny. Same wiadomości nie zmieniają pasków." };
-    const own = data.aiProvider === "own" ? process.env["GOOGLE_API_KEY"] : undefined;
-    if (data.aiProvider === "own" && !own) return { error: "Klucz Gemini nie jest jeszcze zapisany. Dodaj GOOGLE_API_KEY w ustawieniach sekretów projektu." };
-    const key = own || process.env["LOVABLE_API_KEY"];
-    if (!key) return { error: "Brak klucza AI — dodaj klucz Gemini w Ustawieniach." };
-    const url = own ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : "https://ai.gateway.lovable.dev/v1/chat/completions";
-    const model = own ? OWN_MODEL_ID : BUILT_IN_MODEL_ID;
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: keyRow } = await supabaseAdmin
+      .from("user_ai_keys")
+      .select("gemini_key")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const key = keyRow?.gemini_key?.trim();
+    if (!key) return { error: "Brak klucza Gemini API. Dodaj swój klucz w Profilu artysty, aby korzystać z Mentora." };
+    const url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+    const model = OWN_MODEL_ID;
     const ctx = `Kontekst: mode=${data.mode}, obecne paski=${JSON.stringify(data.skills)}, seria dni=${data.streak}, data=${new Date().toISOString().slice(0, 10)}.`;
     const userContent: unknown[] = [{ type: "text", text: `${ctx}\n\n${data.message || "(brak opisu)"}` }];
     if (data.image) userContent.push({ type: "image_url", image_url: { url: data.image } });
@@ -77,7 +81,3 @@ export const askAtelier = createServerFn({ method: "POST" })
       return { error: "Mentor nie zwrócił poprawnej oceny. Paski nie zostały zmienione." };
     }
   });
-
-export const getAiSettings = createServerFn({ method: "GET" }).handler(() => ({
-  ownKeyConfigured: Boolean(process.env["GOOGLE_API_KEY"]),
-}));
