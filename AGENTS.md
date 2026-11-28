@@ -29,8 +29,8 @@ use the editor.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
 # AGENTS
-- Atelier OS state lives in browser localStorage (src/lib/atelier.ts) for the prototype; move to Cloud when accounts/sync are needed.
-- AI mentor calls go through createServerFn in src/lib/atelier.functions.ts returning validated JSON {reply, skills, task}; use the existing gateway by default and server-held GOOGLE_API_KEY only when the user selects their own Gemini, so private keys never enter browser state or backups.
+- Atelier OS state syncs to Lovable Cloud (`public.user_state`) per signed-in user with localStorage cache (`src/lib/atelier.ts`), and artist profiles live in `public.profiles` (`/profil`).
+- AI mentor calls go through `createServerFn` (`requireSupabaseAuth`) in `src/lib/atelier.functions.ts` returning validated JSON `{reply, skills, task}`; every user must supply their own Gemini API key stored server-side in `public.user_ai_keys` (no `LOVABLE_API_KEY` or shared `GOOGLE_API_KEY` fallback).
 - Keep image-review score normalization in src/lib/atelier-scoring.ts and validate imported state before saving, so chat/tasks and malformed backups cannot change assessment scores.
 - Keep session controls and boot UI inside Mentor; use endDayState for shutdown so only conversation data is cleared and all other tabs remain accessible.
 - Store validated custom colors with prototype state and apply them through root semantic CSS tokens, deriving surface and foreground colors to keep light and dark palettes readable.

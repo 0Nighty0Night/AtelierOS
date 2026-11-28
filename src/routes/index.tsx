@@ -1,10 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Download, Upload, Power, Pause, Play, Moon, Terminal } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Images, Send, ImagePlus, Target, Flame, Check, X, Loader2, Settings as Cog, Download, Upload, Power, Pause, Play, Moon, Terminal, User, KeyRound, Cloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 import { isLightColor } from "@/lib/atelier-theme";
-import { askAtelier, getAiSettings } from "@/lib/atelier.functions";
+import { askAtelier } from "@/lib/atelier.functions";
+import { getProfile } from "@/lib/profile.functions";
 import { SKILLS, compressImage, initialState, load, rank, save, streak, today, type State, type Msg, THEMES, parseBackup, startSession, finishBoot, pauseSession, endDayState, type SessionStatus } from "@/lib/atelier";
 
 export const Route = createFileRoute("/")({
@@ -50,9 +52,65 @@ function Atelier() {
   const [tab, setTab] = useState<Tab>("panel");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<{ displayName: string; avatarUrl: string | null; hasGeminiKey: boolean } | null>(null);
+  const [syncState, setSyncState] = useState<"idle" | "saving" | "synced">("idle");
+  const cloudReadyRef = useRef(false);
 
   useEffect(() => setSt(load()), []);
   useEffect(() => { if (st) { try { save(st); } catch { setErr("Brak miejsca na zapis. Wyeksportuj kopię danych w Ustawieniach; ostatnie zmiany są teraz tylko w pamięci."); } } }, [st]);
+
+  useEffect(() => {
+    let active = true;
+    async function hydrateCloud() {
+      const { data } = await supabase.auth.getUser();
+      if (!active) return;
+      if (!data.user) {
+        setUserId(null);
+        setProfile(null);
+        cloudReadyRef.current = false;
+        return;
+      }
+      const uid = data.user.id;
+      setUserId(uid);
+      const [profileRes, stateRes] = await Promise.allSettled([
+        getProfile(),
+        supabase.from("user_state").select("data").eq("user_id", uid).maybeSingle(),
+      ]);
+      if (!active) return;
+      if (profileRes.status === "fulfilled") {
+        setProfile({ displayName: profileRes.value.displayName, avatarUrl: profileRes.value.avatarUrl, hasGeminiKey: profileRes.value.hasGeminiKey });
+      }
+      if (stateRes.status === "fulfilled" && stateRes.value.data?.data) {
+        try {
+          const remote = parseBackup(stateRes.value.data.data);
+          setSt(remote);
+          setSyncState("synced");
+        } catch { /* ignore malformed remote state */ }
+      } else {
+        const local = load();
+        await supabase.from("user_state").upsert({ user_id: uid, data: local as unknown as Record<string, never>, updated_at: new Date().toISOString() });
+        if (active) setSyncState("synced");
+      }
+      cloudReadyRef.current = true;
+    }
+    void hydrateCloud();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") void hydrateCloud();
+    });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (!st || !userId || !cloudReadyRef.current) return;
+    setSyncState("saving");
+    const timer = window.setTimeout(() => {
+      void supabase.from("user_state")
+        .upsert({ user_id: userId, data: st as unknown as Record<string, never>, updated_at: new Date().toISOString() })
+        .then(({ error }) => { if (!error) setSyncState("synced"); });
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [st, userId]);
   const theme = st?.theme;
   useEffect(() => { if (theme) document.documentElement.dataset['theme'] = theme; }, [theme]);
   const customColors = st?.customColors;
@@ -98,12 +156,14 @@ function Atelier() {
 
   async function ask(mode: "review" | "task" | "chat", message: string, image?: string) {
     if (!st || busy || st.session.status !== "online") return;
+    if (!userId) { setErr("Zaloguj się, aby korzystać z Mentora."); return; }
+    if (profile && !profile.hasGeminiKey) { setErr("Dodaj swój klucz Gemini API w Profilu artysty, aby rozmawiać z Mentorem."); return; }
     setBusy(true); setErr(null);
     const userMsg: Msg = { role: "user", content: message || (mode === "task" ? "Daj zadanie na dziś." : "Oceń moją pracę."), ...(image ? { image } : {}), at: Date.now() };
     setSt((p) => p && { ...p, messages: [...p.messages, userMsg] });
     try {
       const r = await askAtelier({ data: {
-        mode, message: userMsg.content, aiProvider: st.aiProvider, ...(image ? { image } : {}), skills: st.skills, streak: s,
+        mode, message: userMsg.content, ...(image ? { image } : {}), skills: st.skills, streak: s,
         recent: st.messages.slice(-8).map((m) => ({ role: m.role, content: m.content.slice(0, 1500) })),
       } });
       if ("error" in r && r.error) { setErr(r.error); return; }
@@ -124,7 +184,20 @@ function Atelier() {
     <div className="min-h-screen bg-background text-foreground paper-grain">
       <div className="pb-24">
         <header className="mx-auto max-w-2xl px-4 pt-6 pb-3">
-          <h1 className="text-2xl font-extrabold tracking-normal">🎨 ATELIER OS <span className="text-primary">v1.0</span></h1>
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="text-2xl font-extrabold tracking-normal">🎨 ATELIER OS <span className="text-primary">v1.0</span></h1>
+            {userId ? (
+              <Link to="/profil" className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1 text-xs hover:border-accent">
+                <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-muted">
+                  {profile?.avatarUrl ? <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" /> : <User size={13} />}
+                </span>
+                <span className="max-w-[110px] truncate">{profile?.displayName || "Profil"}</span>
+                {syncState !== "idle" && <Cloud size={12} className={syncState === "synced" ? "text-chart-3" : "text-accent animate-pulse"} aria-label={syncState === "synced" ? "Zsynchronizowano" : "Zapisywanie"} />}
+              </Link>
+            ) : (
+              <Button asChild size="sm" variant="outline"><Link to="/auth">Zaloguj się</Link></Button>
+            )}
+          </div>
           <p className="mt-1 text-[11px] uppercase text-muted-foreground flex flex-wrap gap-x-2 gap-y-1 items-center">
             <span>Status:</span>
             <span className={`chip inline-flex items-center ${status === "online" ? "text-chart-3" : status === "standby" ? "text-accent" : "text-muted-foreground"}`}>
@@ -139,9 +212,9 @@ function Atelier() {
         <main className="mx-auto max-w-2xl px-4">
           {err && <div className="mb-3 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm flex justify-between gap-2"><span>{err}</span><Button variant="unstyled" onClick={() => setErr(null)}><X size={16} /></Button></div>}
           {tab === "panel" && <Panel st={st} setSt={setSt} avg={avg} streakN={s} busy={busy} ask={ask} goMentor={() => setTab("mentor")} />}
-          {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} onStart={startDay} onPause={pauseDay} onEnd={endDay} />}
+          {tab === "mentor" && <Mentor st={st} busy={busy} ask={ask} onStart={startDay} onPause={pauseDay} onEnd={endDay} signedIn={Boolean(userId)} hasGeminiKey={Boolean(profile?.hasGeminiKey)} />}
           {tab === "galeria" && <Gallery st={st} />}
-          {tab === "ustawienia" && <SettingsView st={st} setSt={setSt} />}
+          {tab === "ustawienia" && <SettingsView st={st} setSt={setSt} signedIn={Boolean(userId)} hasGeminiKey={Boolean(profile?.hasGeminiKey)} />}
         </main>
 
         <nav className="fixed bottom-0 inset-x-0 border-t border-border bg-card/95 backdrop-blur">
@@ -313,10 +386,11 @@ function Stat({ label, value, small }: { label: string; value: React.ReactNode; 
   );
 }
 
-function Mentor({ st, busy, ask, onStart, onPause, onEnd }: {
+function Mentor({ st, busy, ask, onStart, onPause, onEnd, signedIn, hasGeminiKey }: {
   st: State; busy: boolean;
   ask: (m: "review" | "task" | "chat", msg: string, img?: string) => Promise<void>;
   onStart: () => void; onPause: () => void; onEnd: () => void;
+  signedIn: boolean; hasGeminiKey: boolean;
 }) {
   const [text, setText] = useState("");
   const [img, setImg] = useState<string | undefined>();
@@ -339,7 +413,21 @@ function Mentor({ st, busy, ask, onStart, onPause, onEnd }: {
           <Button variant="outline" size="sm" disabled={busy} onClick={onEnd} className="gap-2" title="Zakończ dzień i usuń rozmowę"><Power size={14} />OFFLINE</Button>
         </div>}
       </div>
-      {st.session.status !== "online" ? <SessionScreen status={st.session.status} onStart={onStart} onEnd={onEnd} /> : <>
+      {st.session.status !== "online" ? <SessionScreen status={st.session.status} onStart={onStart} onEnd={onEnd} /> : !signedIn ? (
+        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+          <User size={30} className="mb-3 text-primary" />
+          <h2 className="text-lg font-semibold">Zaloguj się, aby uruchomić Mentora</h2>
+          <p className="mt-2 max-w-sm text-xs text-muted-foreground">Konto synchronizuje Twoje postępy między urządzeniami i pozwala zapisać własny klucz Gemini API.</p>
+          <Button asChild className="mt-5"><Link to="/auth">Przejdź do logowania</Link></Button>
+        </div>
+      ) : !hasGeminiKey ? (
+        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+          <KeyRound size={30} className="mb-3 text-accent" />
+          <h2 className="text-lg font-semibold">Wymagany własny klucz Gemini API</h2>
+          <p className="mt-2 max-w-sm text-xs text-muted-foreground">Mentor przetwarza zapytania wyłącznie na Twoim kluczu z Google AI Studio. Dodaj go w Profilu artysty.</p>
+          <Button asChild className="mt-5"><Link to="/profil">Otwórz Profil artysty</Link></Button>
+        </div>
+      ) : <>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
       {st.messages.length === 0 && (
         <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
@@ -390,11 +478,8 @@ function Gallery({ st }: { st: State }) {
   );
 }
 
-function SettingsView({ st, setSt }: { st: State; setSt: React.Dispatch<React.SetStateAction<State | null>> }) {
-  const [configured, setConfigured] = useState<boolean | null>(null);
+function SettingsView({ st, setSt, signedIn, hasGeminiKey }: { st: State; setSt: React.Dispatch<React.SetStateAction<State | null>>; signedIn: boolean; hasGeminiKey: boolean }) {
   const [notice, setNotice] = useState("");
-  const refresh = () => getAiSettings().then((r) => setConfigured(r.ownKeyConfigured)).catch(() => setNotice("Nie udało się sprawdzić połączenia."));
-  useEffect(() => { void refresh(); }, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const exportData = () => {
     const blob = new Blob([JSON.stringify(st)], { type: "application/json" });
@@ -435,13 +520,17 @@ function SettingsView({ st, setSt }: { st: State; setSt: React.Dispatch<React.Se
           </div>
         </div>
       </Section>
-      <Section title="🔑 Połączenie z Gemini">
-        <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Dostawca AI">
-          <Button variant={st.aiProvider === "built-in" ? "default" : "outline"} onClick={() => setSt((p) => p && { ...p, aiProvider: "built-in" })}>Wbudowane AI</Button>
-          <Button variant={st.aiProvider === "own" ? "default" : "outline"} disabled={!configured} onClick={() => setSt((p) => p && { ...p, aiProvider: "own" })}>Własny Gemini</Button>
+      <Section title="🔑 Konto i klucz Gemini API">
+        <p className="text-xs text-muted-foreground">
+          {!signedIn
+            ? "Zaloguj się, aby synchronizować dane między urządzeniami i podłączyć własny klucz Gemini API."
+            : hasGeminiKey
+              ? "Twój własny klucz Gemini API jest zapisany bezpiecznie na serwerze, a postępy synchronizują się z kontem."
+              : "Jesteś zalogowany, ale nie dodałeś jeszcze klucza Gemini API. Mentor wymaga go do działania."}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button asChild variant="outline"><Link to={signedIn ? "/profil" : "/auth"}>{signedIn ? "Otwórz Profil artysty" : "Zaloguj się / Załóż konto"}</Link></Button>
         </div>
-        <p className="text-xs text-muted-foreground">{configured === null ? "Sprawdzanie klucza…" : configured ? "Klucz Gemini zapisany bezpiecznie. Nie jest udostępniany przeglądarce ani eksportowany." : "Brak własnego klucza. Dodaj GOOGLE_API_KEY w ustawieniach sekretów projektu Lovable."}</p>
-        <Button variant="outline" className="mt-3" onClick={() => void refresh()}>Odśwież połączenie</Button>
       </Section>
       <Section title="💾 Dane">
         <div className="flex flex-wrap gap-2 text-sm">
